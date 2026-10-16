@@ -110,6 +110,11 @@ table.kpi td .nm{font-weight:600;font-size:.84rem;line-height:1.25}
 .exp .rowx>button{flex:1}
 .exp details{font-size:.86rem} .exp summary{cursor:pointer;color:var(--accent);font-weight:600;padding:4px 0}
 .exp .msg{white-space:pre-wrap;margin:6px 0 0;padding:10px;background:var(--bg);border-radius:8px;user-select:text;-webkit-user-select:text}
+.alertp{background:var(--bad-soft);border:1px solid var(--bad);border-radius:var(--r);padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.alertp h2{color:var(--bad);font-size:.98rem}
+.alertp .it{font-size:.88rem;line-height:1.5}
+.alertp .it b{font-weight:700}
+.dn{color:var(--bad);font-weight:700;font-size:.72rem;display:block}
 /* update */
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:12px}
 .bigpick{display:flex;flex-direction:column;align-items:center;gap:8px;padding:22px 16px;border:2px dashed var(--accent);border-radius:12px;text-align:center;background:var(--accent-soft);cursor:pointer;color:var(--ink)}
@@ -167,6 +172,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
 <main id="v-home" class="gut">
   <div id="store-banner" class="banner" hidden>Trình duyệt này không lưu được dữ liệu. Hãy mở file bằng Chrome hoặc Safari, và sao lưu thường xuyên ở mục Cài đặt.</div>
   <div id="target-banner" class="banner" hidden></div>
+  <section id="alert-panel" class="alertp" hidden></section>
   <section class="summary" id="summary"></section>
   <div style="display:flex;flex-direction:column;gap:8px">
     <div class="rowx" style="justify-content:space-between"><div class="seg" role="group" aria-label="Kiểu xem"><button data-view="table" aria-pressed="true">Bảng</button><button data-view="cards" aria-pressed="false">Thẻ</button></div><button class="ghost" id="share-btn">Xuất ảnh</button></div>
@@ -479,7 +485,27 @@ function renderAll(){
   const mb=$('#mbar');
   if(curDate){ const {m,d,D}=monthInfo(curDate); mb.innerHTML=`<span>Tháng ${m}</span><span class="track"><span class="fill" style="display:block;width:${(d/D*100).toFixed(1)}%"></span></span><span>đã bán ${d}/${D} ngày · còn ${D-d}</span>`; }
   else mb.textContent='Chưa có số liệu';
-  renderSummary(); renderList(); renderSettings();
+  renderSummary(); renderAlerts(); renderList(); renderSettings();
+}
+/* Chỉ số chưa đạt VÀ đang giảm so với lần nhập trước (cùng tháng) */
+const ALERT_MIN=0.5;
+const METRICS=[['est','Est DS',c=>c.pE,c=>c.levels.est],['hot','Est hot',c=>c.pH,c=>c.levels.hot],['vt','Vệ tinh',c=>c.V&&c.vtRow&&c.vtRow.target?c.V.ht:null,c=>c.V?c.V.lvl:'na'],['fs','Friendsell',c=>c.fs,c=>c.levels.fs],['clpv','Hài lòng',c=>c.q,c=>c.levels.clpv]];
+function declines(r){
+  if(!r.p) return [];
+  const out=[];
+  for(const [k,label,get,lv] of METRICS){ const cur=get(r.c), prev=get(r.p.c), l=lv(r.c);
+    if(cur==null||prev==null||l==='good'||l==='na') continue;
+    if(prev-cur>=ALERT_MIN) out.push({k,label,cur,prev,diff:prev-cur}); }
+  return out;
+}
+function dnMark(r,k){ const d=declines(r).find(x=>x.k===k); return d?`<span class="dn">▼ ${nf1.format(d.diff)} điểm</span>`:''; }
+function renderAlerts(){
+  const box=$('#alert-panel'); const rows=curDate&&snap(curDate)?sortedRows():null; const prev=curDate&&prevSnap(curDate);
+  if(!rows||!prev){ box.hidden=true; return; }
+  const items=rows.map(r=>({r,d:declines(r)})).filter(x=>x.d.length).sort((a,b)=>b.d.length-a.d.length);
+  if(!items.length){ box.hidden=true; return; }
+  box.hidden=false;
+  box.innerHTML=`<h2>⚠️ ${items.length} bạn có chỉ số chưa đạt và đang giảm so với ${dmy(prev.date)}</h2>`+items.map(x=>`<div class="it"><b>${esc(short(x.r.e.name))}</b>: ${x.d.map(d=>`${d.label} ${pct(d.cur)} <span style="color:var(--bad);font-weight:700">▼${nf1.format(d.diff)}</span>`).join(' · ')}</div>`).join('');
 }
 function renderSummary(){
   const box=$('#summary'), tb=$('#target-banner'); box.innerHTML='';
@@ -550,21 +576,21 @@ function renderList(){
 function renderTable(){
   const rows=sortedRows(), wrap=$('#table-wrap'), S=state.settings, sv=snap(curDate);
   const hasVT=!!(sv.vt&&sv.vt.rows.length);
-  const vtCells=(r,V)=>!hasVT?'':r?cell('',r.target?money(r.target):'—','')+cell(V.lvl,r.target?pct(V.ht):'—',money(r.dt)):'<td>—</td><td>—</td>';
+  const vtCells=(r,V,mk)=>!hasVT?'':r?cell('',r.target?money(r.target):'—','')+cell(V.lvl,r.target?pct(V.ht):'—',money(r.dt)+(mk||'')):'<td>—</td><td>—</td>';
   const cell=(lvl,main,sub)=>`<td class="${lvl&&lvl!=='na'?'lv '+lvl:''}">${main}${sub?`<span class="sub">${sub}</span>`:''}</td>`;
   const lvHt=(p)=>p==null?'na':'';
   let h=`<table class="kpi"><thead><tr><th>Nhân viên</th><th>Target DS</th><th>%HT DS</th><th>Est DS<br>(≥${nf0.format(S.estGood)}%)</th><th>Target hot</th><th>%HT hot</th><th>Est hot<br>(&gt;${nf0.format(S.hotGood)}%)</th>${hasVT?`<th>Target VT</th><th>%HT VT<br>(≥${nf0.format(S.vtGood)}%)</th>`:''}<th>Friendsell<br>(≥${nf0.format(S.fsTarget)}%)</th><th>Hài lòng<br>(&gt;${nf0.format(S.clpvGood)}%)</th></tr></thead><tbody>`;
-  for(const {e,c} of rows){
+  for(const R of rows){ const {e,c}=R;
     h+=`<tr><td><div class="nm">${esc(short(e.name))}</div><span class="sub" style="font-size:.7rem;color:var(--muted)">${e.code?esc(e.code):''}</span></td>`
       +cell('',money(e.target_dt),e._tmpDt?'tạm theo shop':'')
       +cell('',pct(c.htE),money(e.dt))
-      +cell(c.levels.est,e.target_dt?pct(c.pE):'—',money(c.estDt))
+      +cell(c.levels.est,e.target_dt?pct(c.pE):'—',money(c.estDt)+dnMark(R,'est'))
       +cell('',money(e.target_hot),e._tmpHot?'tạm theo shop':'')
       +cell('',pct(c.htH),money(e.dt_hot))
-      +cell(c.levels.hot,e.target_hot?pct(c.pH):'—',money(c.estHot))
-      +vtCells(c.vtRow,c.V)
-      +cell(c.levels.fs,pct(c.fs),e.fs_bills!=null?`${(e.fs_app||0)+(e.fs_zalo||0)}/${e.fs_bills} bill`:'')
-      +cell(c.levels.clpv,pct(c.q),e.clpv_total!=null?`${e.clpv_done??0}/${e.clpv_total}`:'')
+      +cell(c.levels.hot,e.target_hot?pct(c.pH):'—',money(c.estHot)+dnMark(R,'hot'))
+      +vtCells(c.vtRow,c.V,dnMark(R,'vt'))
+      +cell(c.levels.fs,pct(c.fs),(e.fs_bills!=null?`${(e.fs_app||0)+(e.fs_zalo||0)}/${e.fs_bills} bill`:'')+dnMark(R,'fs'))
+      +cell(c.levels.clpv,pct(c.q),(e.clpv_total!=null?`${e.clpv_done??0}/${e.clpv_total}`:'')+dnMark(R,'clpv'))
       +`</tr>`;
   }
   for(const r of unmatchedVT()){ h+=`<tr><td><div class="nm">${esc(r.user)}</div><span class="sub" style="font-size:.7rem;color:var(--muted)">chỉ có vệ tinh</span></td>`+'<td>—</td>'.repeat(6)+vtCells(r,vtCalc(r,curDate))+'<td>—</td><td>—</td></tr>'; }
@@ -615,11 +641,12 @@ function insights(e,c,best){
   if(c.V&&c.vtRow&&c.vtRow.target){ if(c.V.lvl==='good') good.push(`Vệ tinh đạt ${pct(c.V.ht)} target${top('vt')}`); else push.push(`Vệ tinh ${pct(c.V.ht)} → còn thiếu ${money(c.vtRow.target-c.vtRow.dt)}`); }
   return {good,push};
 }
-function empMessage(e,c,best){
+function empMessage(e,c,best,dec){
   const n=given(e.name), x=talk(e,c,best), {d,D}=monthInfo(curDate);
   const L=[`${pick([`Hi ${n} 👋`,`${n} ơi 🙌`,`Chào ${n} 😊`])} chỉ số của em đến ${dmy(curDate)} nè:`];
   if(x.good.length) L.push(`✅ ${x.good.join(', ')}`);
   if(x.push.length) L.push(`🎯 Còn ${D-d} ngày: ${x.push.join(' · ')}`);
+  if(dec&&dec.length) L.push(`⚠️ ${pick(['Đang giảm so với lần trước','Chú ý đang đi xuống','Tụt so với lần trước'])}: ${dec.map(d=>`${d.label} ▼${nf1.format(d.diff)} điểm`).join(' · ')}`);
   L.push(x.push.length?pick(['Tập trung chút là về đích liền! 🚀','Mỗi ngày nhích một chút là đạt thôi nè! 💚','Mình tin em làm được, cố lên! 💪']):pick(['Quá xuất sắc, giữ vững phong độ nha! 🏆','Tuyệt vời luôn, cứ thế phát huy nhé! 🔥']));
   return L.join('\n');
 }
@@ -664,7 +691,7 @@ function drawEmployee(r,best){
   y=bullets(x,W,y,'👏 Làm tốt',ins.good,IMG.good[0],'Chưa có chỉ số đạt ngưỡng, cùng cố gắng nhé!');
   y=bullets(x,W,y,'🎯 Cần cải thiện',ins.push,IMG.bad[0],'Tất cả chỉ số đều đạt. Tuyệt vời, giữ vững phong độ nhé!');
   y=footLines(x,W,y);
-  return {canvas:finish(cv,y),gen:()=>empMessage(e,c,best)};
+  return {canvas:finish(cv,y),gen:()=>empMessage(e,c,best,declines(r))};
 }
 function thresholdLine(){ const S=state.settings, s=snap(curDate), vt=!!(s&&s.vt&&s.vt.rows.length); return `Ngưỡng đạt: Est DS ≥${nf0.format(S.estGood)}% · Est hot >${nf0.format(S.hotGood)}% · Friendsell ≥${nf0.format(S.fsTarget)}% · Hài lòng >${nf0.format(S.clpvGood)}%${vt?` · Vệ tinh ≥${nf0.format(S.vtGood)}%`:''}`; }
 function footLines(x,W,y){ x.font=`500 22px ${FONT}`; for(const l of wrap(x,thresholdLine(),W-112)){ txt(x,l,22,500,IMG.muted,56,y+30); y+=32; } return y+28; }
@@ -838,6 +865,8 @@ function shopMessage(rows,best){
     if(x.push.length) F.push(`${pick(['🎯','💪','⚡'])} ${n}: ${x.push.join(' · ')}`); }
   if(G.length){ L.push(pick(['👏 Khen nè:','🌟 Điểm sáng:','🎉 Tuyên dương:']),...G,''); }
   if(F.length){ L.push(pick(['🚀 Cần tăng tốc:','💡 Cùng cải thiện:','📌 Tập trung nhé:']),...F,''); }
+  const W=rows.map(r=>({n:given(r.e.name),d:declines(r)})).filter(x=>x.d.length);
+  if(W.length){ L.push(pick(['⚠️ Cảnh báo đang giảm:','⚠️ Chú ý, đang đi xuống:','📉 Cần lưu ý, đang giảm:']),...W.map(x=>`🔻 ${x.n}: ${x.d.map(d=>`${d.label} ▼${nf0.format(d.diff)} điểm`).join(' · ')}`),''); }
   L.push(F.length?pick(['Cố lên cả nhà ơi! 💪🔥','Nửa tháng cuối bứt tốc nha team! 🚀','Tin cả nhà làm được, chiến thôi! 💚','Mỗi ngày nhích một chút, cuối tháng về đích! 🏁']):pick(['Cả shop đều đạt, quá đỉnh! 🏆🎉','Team mình xuất sắc quá, giữ vững nha! 🔥']));
   return L.join('\n');
 }
