@@ -126,6 +126,11 @@ table.kpi td .nm{font-weight:600;font-size:.84rem;line-height:1.25}
 .iconbtn svg{width:20px;height:20px;display:block}
 .toast{bottom:calc(20px + env(safe-area-inset-bottom,0px))!important}
 .rv .more{align-self:flex-start;min-height:34px;padding:4px 0}
+.cmp{gap:8px}
+.cmp .it{font-size:.88rem;line-height:1.55}
+.cmp .up{color:var(--good);font-weight:700}
+.cmp .dn2{color:var(--bad);font-weight:700}
+.cmp-warn{background:var(--bad-soft);color:var(--bad);font-weight:700;font-size:.86rem;padding:8px 10px;border-radius:8px}
 /* update */
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:12px}
 .bigpick{display:flex;flex-direction:column;align-items:center;gap:8px;padding:22px 16px;border:2px dashed var(--accent);border-radius:12px;text-align:center;background:var(--accent-soft);cursor:pointer;color:var(--ink)}
@@ -510,13 +515,27 @@ function declines(r){
   return out;
 }
 function dnMark(r,k){ const d=declines(r).find(x=>x.k===k); return d?`<span class="dn">▼ ${nf1.format(d.diff)} điểm</span>`:''; }
+/* Tăng / giảm của mọi chỉ số so với lần nhập trước (cùng tháng) */
+function changes(r){
+  if(!r.p) return [];
+  const out=[];
+  for(const [k,label,get,lv] of METRICS){ const cur=get(r.c), prev=get(r.p.c); if(cur==null||prev==null) continue;
+    const diff=cur-prev; if(Math.abs(diff)<ALERT_MIN) continue;
+    const l=lv(r.c); out.push({k,label,cur,prev,diff,warn:diff<0&&l!=='good'&&l!=='na'}); }
+  return out;
+}
 function renderAlerts(){
   const box=$('#alert-panel'); const rows=curDate&&snap(curDate)?sortedRows():null; const prev=curDate&&prevSnap(curDate);
   if(!rows||!prev){ box.hidden=true; return; }
-  const items=rows.map(r=>({r,d:declines(r)})).filter(x=>x.d.length).sort((a,b)=>b.d.length-a.d.length);
-  if(!items.length){ box.hidden=true; return; }
-  box.hidden=false;
-  box.innerHTML=`<h2>⚠️ ${items.length} bạn có chỉ số chưa đạt và đang giảm so với ${dmy(prev.date)}</h2>`+items.map(x=>`<div class="it"><b>${esc(short(x.r.e.name))}</b>: ${x.d.map(d=>`${d.label} ${pct(d.cur)} <span style="color:var(--bad);font-weight:700">▼${nf1.format(d.diff)}</span>`).join(' · ')}</div>`).join('');
+  const items=rows.map(r=>({r,c:changes(r)})).filter(x=>x.c.length);
+  if(!items.length){ box.hidden=false; box.className='panel cmp'; box.innerHTML=`<h2>📊 So với lần nhập ${dmy(prev.date)}</h2><div class="muted">Các chỉ số không đổi đáng kể.</div>`; return; }
+  const warnN=items.filter(x=>x.c.some(c=>c.warn)).length;
+  items.sort((a,b)=>(b.c.filter(c=>c.warn).length-a.c.filter(c=>c.warn).length)||(a.c.reduce((s,c)=>s+c.diff,0)-b.c.reduce((s,c)=>s+c.diff,0)));
+  box.hidden=false; box.className='panel cmp';
+  box.innerHTML=`<h2>📊 So với lần nhập ${dmy(prev.date)}</h2>`
+    +(warnN?`<div class="cmp-warn">⚠️ ${warnN} bạn có chỉ số chưa đạt mà còn đang giảm</div>`:'')
+    +items.map(x=>`<div class="it">${x.c.some(c=>c.warn)?'⚠️ ':''}<b>${esc(short(x.r.e.name))}</b>: ${x.c.map(c=>`${c.label} ${pct(c.cur)} <span class="${c.diff>0?'up':'dn2'}">${c.diff>0?'▲':'▼'}${nf1.format(Math.abs(c.diff))}</span>`).join(' · ')}</div>`).join('')
+    +`<div class="muted" style="font-size:.76rem">▲ tăng · ▼ giảm (điểm %). ⚠️ = chưa đạt ngưỡng mà còn giảm.</div>`;
 }
 function unmatchedVT(){ return []; }
 function sortedRows(){
@@ -752,6 +771,8 @@ function shopMessage(rows,best){
     if(x.push.length) F.push(`${pick(['🎯','💪','⚡'])} ${n}: ${x.push.join(' · ')}`); }
   if(G.length){ L.push(pick(['👏 Khen nè:','🌟 Điểm sáng:','🎉 Tuyên dương:']),...G,''); }
   if(F.length){ L.push(pick(['🚀 Cần tăng tốc:','💡 Cùng cải thiện:','📌 Tập trung nhé:']),...F,''); }
+  const U=rows.map(r=>({n:given(r.e.name),u:changes(r).filter(c=>c.diff>=1)})).filter(x=>x.u.length);
+  if(U.length){ L.push(pick(['📈 Tiến bộ so với lần trước:','🚀 Bứt tốc so với lần trước:','👍 Tăng so với lần trước:']),...U.map(x=>`🔺 ${x.n}: ${x.u.map(c=>`${c.label} ▲${nf0.format(c.diff)}`).join(' · ')}`),''); }
   const W=rows.map(r=>({n:given(r.e.name),d:declines(r)})).filter(x=>x.d.length);
   if(W.length){ L.push(pick(['⚠️ Cảnh báo đang giảm:','⚠️ Chú ý, đang đi xuống:','📉 Cần lưu ý, đang giảm:']),...W.map(x=>`🔻 ${x.n}: ${x.d.map(d=>`${d.label} ▼${nf0.format(d.diff)} điểm`).join(' · ')}`),''); }
   L.push(F.length?pick(['Cố lên cả nhà ơi! 💪🔥','Nửa tháng cuối bứt tốc nha team! 🚀','Tin cả nhà làm được, chiến thôi! 💚','Mỗi ngày nhích một chút, cuối tháng về đích! 🏁']):pick(['Cả shop đều đạt, quá đỉnh! 🏆🎉','Team mình xuất sắc quá, giữ vững nha! 🔥']));
@@ -905,7 +926,7 @@ async function readAll(){
     carryTargets(emps,date); carryCD(emps,date);
     if(vtImgs.length>1) vtDiff=null;
     setStatus(`Đã đọc ${emps.length?emps.length+' nhân viên':''}${emps.length&&vtRows.length?' và ':''}${vtRows.length?vtRows.length+' dòng vệ tinh':''}${fail?`, ${fail} ảnh không đọc được`:''}.`,!!fail);
-    openReview({date,updated:updated||vtUpdated,employees:emps,hasEmp:emps.length>0,vt:vtRows.length?{rows:vtRows,imgs:vtImgs,diff:vtDiff}:null});
+    openReview({date,updated:updated||vtUpdated,employees:emps,hasEmp:emps.length>0,fromImages:true,vt:vtRows.length?{rows:vtRows,imgs:vtImgs,diff:vtDiff}:null});
   }catch(err){
     worker=null; dworker=null;
     setStatus('Chưa chạy được bộ đọc chữ. Lần đầu cần có mạng; nếu vẫn lỗi hãy mở bằng Safari hoặc Chrome, hoặc dùng Nhập tay. Mã lỗi: '+String(err&&err.message||err).slice(0,80),true);
@@ -1013,7 +1034,8 @@ $('#save-edit').onclick=()=>{
   const old=snap(date);
   if(draft.hasEmp&&!emps.length&&!(vtRows&&vtRows.length)){ toast('Cần ít nhất một nhân viên có tên.'); return; }
   const finalEmps=draft.hasEmp?emps:(old?old.employees:[]);
-  const finalVt=vtRows?(vtRows.length?{rows:vtRows}:null):(old?old.vt||null:null);
+  /* Đọc ảnh nhân viên mà không kèm ảnh vệ tinh → vệ tinh để trống (không lấy lại số cũ). Chỉ gửi ảnh vệ tinh → giữ số nhân viên. */
+  const finalVt=vtRows?(vtRows.length?{rows:vtRows}:null):(draft.fromImages&&draft.hasEmp?null:(old?old.vt||null:null));
   state.snapshots=state.snapshots.filter(s=>s.date!==date);
   state.snapshots.push({date,updated:draft.updated||old?.updated||null,employees:finalEmps,vt:finalVt});
   state.snapshots.sort((a,b)=>a.date<b.date?-1:1);
