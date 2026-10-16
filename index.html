@@ -115,6 +115,12 @@ table.kpi td .nm{font-weight:600;font-size:.84rem;line-height:1.25}
 .alertp .it{font-size:.88rem;line-height:1.5}
 .alertp .it b{font-weight:700}
 .dn{color:var(--bad);font-weight:700;font-size:.72rem;display:block}
+.cdp summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
+.cdp summary::-webkit-details-marker{display:none}
+.cdp[open] summary{margin-bottom:6px}
+.cdl{display:flex;flex-direction:column;gap:8px}
+.cdl label{display:flex;align-items:center;justify-content:space-between;gap:10px;font-weight:600;font-size:.92rem}
+.cdl input{max-width:170px;text-align:right}
 /* update */
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:12px}
 .bigpick{display:flex;flex-direction:column;align-items:center;gap:8px;padding:22px 16px;border:2px dashed var(--accent);border-radius:12px;text-align:center;background:var(--accent-soft);cursor:pointer;color:var(--ink)}
@@ -174,6 +180,11 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
   <div id="target-banner" class="banner" hidden></div>
   <section id="alert-panel" class="alertp" hidden></section>
   <section class="summary" id="summary"></section>
+  <details class="panel cdp" id="cd-panel" hidden>
+    <summary><b>✏️ Nhập DS cận date</b> <span class="muted" style="font-size:.82rem">(ảnh app chưa có số, ô để trống tính là 0)</span></summary>
+    <div id="cd-list" class="cdl"></div>
+    <button class="primary" id="cd-save">Lưu cận date</button>
+  </details>
   <div style="display:flex;flex-direction:column;gap:8px">
     <div class="rowx" style="justify-content:space-between"><div class="seg" role="group" aria-label="Kiểu xem"><button data-view="table" aria-pressed="true">Bảng</button><button data-view="cards" aria-pressed="false">Thẻ</button></div><button class="ghost" id="share-btn">Xuất ảnh</button></div>
     <div class="chips" id="sort-chips" role="group" aria-label="Sắp xếp">
@@ -485,7 +496,7 @@ function renderAll(){
   const mb=$('#mbar');
   if(curDate){ const {m,d,D}=monthInfo(curDate); mb.innerHTML=`<span>Tháng ${m}</span><span class="track"><span class="fill" style="display:block;width:${(d/D*100).toFixed(1)}%"></span></span><span>đã bán ${d}/${D} ngày · còn ${D-d}</span>`; }
   else mb.textContent='Chưa có số liệu';
-  renderSummary(); renderAlerts(); renderList(); renderSettings();
+  renderSummary(); renderCD(); renderAlerts(); renderList(); renderSettings();
 }
 /* Chỉ số chưa đạt VÀ đang giảm so với lần nhập trước (cùng tháng) */
 const ALERT_MIN=0.5;
@@ -507,6 +518,20 @@ function renderAlerts(){
   box.hidden=false;
   box.innerHTML=`<h2>⚠️ ${items.length} bạn có chỉ số chưa đạt và đang giảm so với ${dmy(prev.date)}</h2>`+items.map(x=>`<div class="it"><b>${esc(short(x.r.e.name))}</b>: ${x.d.map(d=>`${d.label} ${pct(d.cur)} <span style="color:var(--bad);font-weight:700">▼${nf1.format(d.diff)}</span>`).join(' · ')}</div>`).join('');
 }
+function renderCD(){
+  const p=$('#cd-panel'), s=curDate&&snap(curDate);
+  if(!s||!(s.employees||[]).length){ p.hidden=true; return; } p.hidden=false;
+  const L=$('#cd-list'); L.innerHTML='';
+  s.employees.forEach((e,i)=>{ const lab=document.createElement('label'); lab.htmlFor='cd-'+i; lab.textContent=short(e.name);
+    const inp=document.createElement('input'); inp.id='cd-'+i; inp.inputMode='numeric'; inp.placeholder='0'; inp.value=e.dt_cd?nf0.format(e.dt_cd):'';
+    inp.onchange=()=>{ const v=parseMoney(inp.value); inp.value=v?nf0.format(v):''; };
+    lab.appendChild(inp); L.appendChild(lab); });
+}
+$('#cd-save').onclick=()=>{
+  const s=curDate&&snap(curDate); if(!s) return;
+  s.employees.forEach((e,i)=>{ const v=parseMoney($('#cd-'+i).value); e.dt_cd=v||0; });
+  const ok=save(); $('#cd-panel').open=false; renderAll(); toast(ok?'Đã lưu cận date.':'Đã cập nhật nhưng trình duyệt không lưu được.');
+};
 function renderSummary(){
   const box=$('#summary'), tb=$('#target-banner'); box.innerHTML='';
   const s=curDate&&snap(curDate);
@@ -579,7 +604,7 @@ function renderTable(){
   const vtCells=(r,V,mk)=>!hasVT?'':r?cell('',r.target?money(r.target):'—','')+cell(V.lvl,r.target?pct(V.ht):'—',money(r.dt)+(mk||'')):'<td>—</td><td>—</td>';
   const cell=(lvl,main,sub)=>`<td class="${lvl&&lvl!=='na'?'lv '+lvl:''}">${main}${sub?`<span class="sub">${sub}</span>`:''}</td>`;
   const lvHt=(p)=>p==null?'na':'';
-  let h=`<table class="kpi"><thead><tr><th>Nhân viên</th><th>Target DS</th><th>%HT DS</th><th>Est DS<br>(≥${nf0.format(S.estGood)}%)</th><th>Target hot</th><th>%HT hot</th><th>Est hot<br>(&gt;${nf0.format(S.hotGood)}%)</th>${hasVT?`<th>Target VT</th><th>%HT VT<br>(≥${nf0.format(S.vtGood)}%)</th>`:''}<th>Friendsell<br>(≥${nf0.format(S.fsTarget)}%)</th><th>Hài lòng<br>(&gt;${nf0.format(S.clpvGood)}%)</th></tr></thead><tbody>`;
+  let h=`<table class="kpi"><thead><tr><th>Nhân viên</th><th>Target DS</th><th>%HT DS</th><th>Est DS<br>(≥${nf0.format(S.estGood)}%)</th><th>Target hot</th><th>%HT hot</th><th>Est hot<br>(&gt;${nf0.format(S.hotGood)}%)</th><th>Cận date</th>${hasVT?`<th>Target VT</th><th>%HT VT<br>(≥${nf0.format(S.vtGood)}%)</th>`:''}<th>Friendsell<br>(≥${nf0.format(S.fsTarget)}%)</th><th>Hài lòng<br>(&gt;${nf0.format(S.clpvGood)}%)</th></tr></thead><tbody>`;
   for(const R of rows){ const {e,c}=R;
     h+=`<tr><td><div class="nm">${esc(short(e.name))}</div><span class="sub" style="font-size:.7rem;color:var(--muted)">${e.code?esc(e.code):''}</span></td>`
       +cell('',money(e.target_dt),e._tmpDt?'tạm theo shop':'')
@@ -588,6 +613,7 @@ function renderTable(){
       +cell('',money(e.target_hot),e._tmpHot?'tạm theo shop':'')
       +cell('',pct(c.htH),money(e.dt_hot))
       +cell(c.levels.hot,e.target_hot?pct(c.pH):'—',money(c.estHot)+dnMark(R,'hot'))
+      +cell('',money(e.dt_cd||0),'')
       +vtCells(c.vtRow,c.V,dnMark(R,'vt'))
       +cell(c.levels.fs,pct(c.fs),(e.fs_bills!=null?`${(e.fs_app||0)+(e.fs_zalo||0)}/${e.fs_bills} bill`:'')+dnMark(R,'fs'))
       +cell(c.levels.clpv,pct(c.q),(e.clpv_total!=null?`${e.clpv_done??0}/${e.clpv_total}`:'')+dnMark(R,'clpv'))
@@ -609,6 +635,7 @@ function renderTable(){
     +cell('',tH?money(tH):'—',TH.length<E.length?`${TH.length}/${E.length} NV`:'')
     +cell('',tH?pct(sum(TH,r=>r.e.dt_hot)/tH*100):'—',money(sum(E,e=>e.dt_hot)))
     +cell(C[0]?C[0].lvH(pHs):'',pct(pHs),money(sum(C,c=>c.estHot)))
+    +cell('',money(sum(E,e=>e.dt_cd)),'')
     +(hasVT?(()=>{ const vr=sv.vt.rows, vd=sum(vr,r=>r.dt), vtg=sum(vr,r=>r.target); return vtCells({dt:vd,target:vtg},vtCalc({dt:vd,target:vtg},curDate)); })():'')
     +cell(lvFs(fsS),pct(fsS),bills?`${conv}/${bills} bill`:'')
     +cell(C[0]?C[0].lvQ(qS):'',pct(qS),qt?`${qd}/${qt}`:'')
@@ -1018,7 +1045,7 @@ async function readAll(){
     const cnt={}; for(const d of dates) cnt[d]=(cnt[d]||0)+1;
     const date=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]||(a<b?1:-1))[0]||yesterday();
     updated=upd.find(u=>dateFromUpdated(u)===date)||updated||vtUpdated;
-    carryTargets(emps,date);
+    carryTargets(emps,date); carryCD(emps,date);
     if(vtImgs.length>1) vtDiff=null;
     setStatus(`Đã đọc ${emps.length?emps.length+' nhân viên':''}${emps.length&&vtRows.length?' và ':''}${vtRows.length?vtRows.length+' dòng vệ tinh':''}${fail?`, ${fail} ảnh không đọc được`:''}.`,!!fail);
     openReview({date,updated:updated||vtUpdated,employees:emps,hasEmp:emps.length>0,vt:vtRows.length?{rows:vtRows,imgs:vtImgs,diff:vtDiff}:null});
@@ -1026,6 +1053,11 @@ async function readAll(){
     worker=null; dworker=null;
     setStatus('Chưa chạy được bộ đọc chữ. Lần đầu cần có mạng; nếu vẫn lỗi hãy mở bằng Safari hoặc Chrome, hoặc dùng Nhập tay. Mã lỗi: '+String(err&&err.message||err).slice(0,80),true);
   }finally{ $('#pick-zone').classList.remove('busy'); setTimeout(()=>setProg(null),600); }
+}
+function carryCD(emps,date){
+  const prior=state.snapshots.filter(s=>s.date<date&&s.date.slice(0,7)===date.slice(0,7)).sort((a,b)=>a.date<b.date?1:-1)[0];
+  if(!prior) return;
+  for(const e of emps){ if(e.dt_cd) continue; const pe=prior.employees.find(x=>keyOf(x)===keyOf(e)); if(pe&&pe.dt_cd){ e.dt_cd=pe.dt_cd; e._flags=[...new Set([...(e._flags||[]),'dt_cd'])]; } }
 }
 function carryTargets(emps,date){
   const prior=state.snapshots.filter(s=>s.date<=date&&s.date.slice(0,7)===date.slice(0,7)).sort((a,b)=>a.date<b.date?1:-1);
@@ -1039,7 +1071,7 @@ function carryTargets(emps,date){
 }
 
 /* ---------- review / edit ---------- */
-const FIELDS=[['code','Mã NV','text'],['name','Tên','text'],['dt','DS tổng','money'],['target_dt','Target DS','money'],['dt_hot','DS hàng hot','money'],['target_hot','Target hot','money'],['dt_cd','DS cận date','money'],['target_cd','Target cận date','money'],['fs_bills','FS tổng bill','int'],['fs_app','Cài app','int'],['fs_zalo','Cài zalo','int'],['clpv_done','CLPV đạt','int'],['clpv_total','CLPV tổng','int'],['mom','% so tháng trước','dec']];
+const FIELDS=[['code','Mã NV','text'],['name','Tên','text'],['dt','DS tổng','money'],['target_dt','Target DS','money'],['dt_hot','DS hàng hot','money'],['target_hot','Target hot','money'],['dt_cd','DS cận date (tự điền)','money'],['target_cd','Target cận date','money'],['fs_bills','FS tổng bill','int'],['fs_app','Cài app','int'],['fs_zalo','Cài zalo','int'],['clpv_done','CLPV đạt','int'],['clpv_total','CLPV tổng','int'],['mom','% so tháng trước','dec']];
 const blankEmp=()=>({code:'',name:'',rank:null,dt:null,target_dt:null,mom:null,dt_cd:null,target_cd:null,dt_hot:null,target_hot:null,fs_bills:null,fs_app:null,fs_zalo:null,clpv_done:null,clpv_total:null});
 function openReview(d){ draft=d; $('#pick-panel').hidden=true; $('#review').hidden=false; $('#draft-date').value=d.date; renderReview(); window.scrollTo(0,0); }
 function closeReview(){ draft=null; $('#review').hidden=true; $('#pick-panel').hidden=false; }
