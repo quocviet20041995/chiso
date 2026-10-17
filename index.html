@@ -473,8 +473,28 @@ function vtCalc(r,date){
 /* Nhân viên mới chuyển shop có doanh số nhà thuốc nhưng chưa được chia target: tạm dùng target chung của shop (giá trị phổ biến nhất). Không áp cho vệ tinh. */
 function okTarget(e,k){ const v=e[k], d=k==='target_dt'?e.dt:e.dt_hot, min=k==='target_dt'?5000000:500000; return v>=min&&!(d>0&&v<d*0.25); }
 function defTarget(emps,k){ const c={}; for(const e of emps) if(okTarget(e,k)) c[e[k]]=(c[e[k]]||0)+1; let best=null,n=0; for(const v in c){ if(c[v]>n||(c[v]===n&&+v>best)){ best=+v; n=c[v]; } } return best; }
-function effEmps(emps){ emps=emps||[]; const dDt=defTarget(emps,'target_dt'), dH=defTarget(emps,'target_hot');
-  return emps.map(e=>{ if(!(e.dt>0)) return e; const o={...e}; if(!okTarget(o,'target_dt')&&dDt){ o.target_dt=dDt; o._tmpDt=true; } if(!okTarget(o,'target_hot')&&dH){ o.target_hot=dH; o._tmpHot=true; } return o; }); }
+/* Bạn chưa có target (mới chuyển về): target tháng cả shop chia đều cho các bạn có doanh số dược,
+   để tổng target các bạn = target shop. Hàng hot vẫn lấy target phổ biến của shop. */
+function effEmps(emps,st){ emps=emps||[]; const dH=defTarget(emps,'target_hot'), dDt=defTarget(emps,'target_dt');
+  const sellers=emps.filter(e=>e.dt>0), missing=sellers.filter(e=>!okTarget(e,'target_dt'));
+  let per=null, shopT=null;
+  if(missing.length&&sellers.length){
+    shopT=st&&st.dt>0&&okTarget(st,'target_dt')?st.target_dt:null;
+    if(shopT) per=Math.round(shopT/sellers.length/1000)*1000;
+  }
+  const out=emps.map(e=>{ const o={...e};
+    if(per){ if(o.dt>0){ if(o.target_dt!==per){ o.target_dt=per; o._tmpDt=true; } } else o.target_dt=null; }
+    else if(o.dt>0&&!okTarget(o,'target_dt')&&dDt){ o.target_dt=dDt; o._tmpDt=true; }
+    if(o.dt>0&&!okTarget(o,'target_hot')&&dH){ o.target_hot=dH; o._tmpHot=true; }
+    return o; });
+  out.split=missing.length?{per,shopT,n:sellers.length,missing:missing.map(e=>short(e.name))}:null;
+  return out; }
+function tmpNote(rows){
+  const sp=rows.split, out=[];
+  if(sp&&sp.per) out.push(`${sp.missing.join(', ')} chưa có target trên hệ thống → target tháng shop ${money(sp.shopT)} chia đều ${sp.n} bạn có doanh số dược: ${money(sp.per)}/bạn ("tạm").`);
+  else if(sp) out.push(`${sp.missing.join(', ')} chưa có target trên hệ thống → đang tạm lấy bằng target các bạn khác. Up thêm ảnh "Tổng quan shop" để chia đều target shop cho chính xác.`);
+  const h=rows.filter(r=>r.e._tmpHot).map(r=>short(r.e.name)); if(h.length) out.push(`Target hot "tạm" (${h.join(', ')}): theo target hot chung của shop.`);
+  return out.join(' '); }
 function calc(e,date){
   const {d,D}=monthInfo(date), S=state.settings, left=D-d;
   const est=v=>v!=null&&d>0?v/d*D:null;
@@ -523,9 +543,7 @@ async function renderResult(){
   const rows=sortedRowsBy('dt'), best=shopRanks(rows);
   resCanvas=drawFullTable(rows); $('#res-img').src=resCanvas.toDataURL('image/png');
   resGen=()=>shopMessage(rows,best); $('#res-msg').textContent=resGen();
-  const E=rows.map(r=>r.e), tmp=E.filter(e=>e._tmpDt||e._tmpHot);
-  const tb=$('#target-banner'); tb.hidden=!tmp.length;
-  tb.textContent=tmp.length?`* ${tmp.map(e=>short(e.name)).join(', ')} chưa có target trên hệ thống, đang tạm tính theo target chung của shop.`:'';
+  const tn=tmpNote(rows), tb=$('#target-banner'); tb.hidden=!tn; tb.textContent=tn?'* '+tn:'';
 }
 $('#res-save').onclick=()=>{ if(resCanvas) shareFiles([{canvas:resCanvas,name:`bang-chi-so-shop-${curDate.slice(5).replace('-','')}.png`}],null); };
 $('#res-copy').onclick=()=>copyText($('#res-msg').textContent);
@@ -568,11 +586,11 @@ function unmatchedVT(){ return []; }
 function sortedRows(){
   const s=curDate&&snap(curDate); if(!s) return null;
   const prev=prevSnap(curDate);
-  const EE=effEmps(s.employees), PE=prev?effEmps(prev.employees):[];
+  const EE=effEmps(s.employees,s.shopTot), PE=prev?effEmps(prev.employees,prev.shopTot):[];
   const rows=EE.map(e=>{ const c=calc(e,curDate); const pe=prev&&PE.find(x=>keyOf(x)===keyOf(e)); return {e,c,p:pe?{e:pe,c:calc(pe,prev.date)}:null}; });
   const v=r=>({vt:r.c.V?.ht,dt:r.e.dt,est:r.c.pE,hot:r.c.pH,cd:r.e.dt_cd,fs:r.c.fs,clpv:r.c.q}[sortKey]??-Infinity);
   rows.sort(sortKey==='attention'?(a,b)=>(b.c.badN-a.c.badN)||(a.c.goodN-b.c.goodN)||((a.e.dt??0)-(b.e.dt??0)):(a,b)=>v(b)-v(a));
-  return rows;
+  rows.split=EE.split; return rows;
 }
 /* ---------- XUẤT ẢNH ---------- */
 const IMG={bg:'#f3f5f4',card:'#ffffff',ink:'#14201c',muted:'#5d6b66',line:'#dbe2df',accent:'#0b6e5a',accentSoft:'#e1f1ec',
@@ -712,8 +730,8 @@ function drawShop(rows,best){
   const tc=[[Tt.tDt?pct(Tt.pE):'—',Tt.lv.est],[Tt.tH?pct(Tt.pH):'—',Tt.lv.hot],[pct(Tt.fs),Tt.lv.fs],[pct(Tt.q),Tt.lv.clpv]]; if(hasVT) tc.push([pct(Tt.vt),Tt.lv.vt]);
   rowDraw('Cả shop','',tc,true);
   y+=40;
-  const tmp=rows.filter(r=>r.e._tmpDt||r.e._tmpHot).map(r=>short(r.e.name));
-  if(tmp.length){ x.font=`500 22px ${FONT}`; for(const l of wrap(x,`* ${tmp.join(', ')}: chưa có target trên hệ thống, đang tính theo target chung của shop.`,W-112)){ txt(x,l,22,500,IMG.muted,56,y+30); y+=32; } y+=6; }
+  const tn=tmpNote(rows);
+  if(tn){ x.font=`500 22px ${FONT}`; for(const l of wrap(x,'* '+tn,W-112)){ txt(x,l,22,500,IMG.muted,56,y+30); y+=32; } y+=6; }
   y=footLines(x,W,y);
   return finish(cv,y);
 }
@@ -765,7 +783,7 @@ function drawFullTable(rows){
   drawRow('Cả shop',tot,true);
   y+=40;
   const {d:dd,D:DD}=monthInfo(curDate); const notes=[`%Est = (đã bán ÷ ${dd} ngày × ${DD} ngày) ÷ target. TB ngày còn thiếu = (target − đã bán) ÷ ${DD-dd} ngày còn lại để đạt 100%.`];
-  const tmp=rows.filter(r=>r.e._tmpDt||r.e._tmpHot).map(r=>short(r.e.name)); if(tmp.length) notes.push(`"tạm": ${tmp.join(', ')} chưa có target trên hệ thống, tính theo target chung của shop.`);
+  const tn=tmpNote(rows); if(tn) notes.push(tn);
   notes.push(Tt.fromApp?'Dòng Cả shop lấy theo màn hình Tổng quan shop trong app.':'Dòng Cả shop cộng từ các nhân viên (chưa có ảnh Tổng quan shop).');
   if(hasVT) notes.push('Vệ tinh cả shop tính theo dòng Tổng trong app.');
   notes.push(thresholdLine());
