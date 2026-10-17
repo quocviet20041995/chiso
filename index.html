@@ -304,6 +304,16 @@ function parseScreen(lines, W, headerText, colorAt){
   const moneysIn=(rows)=>{ const out=[]; for(const r of rows) for(const w of r.words){ const m=money(w); if(m){ m.row=r; out.push(m); } } return out; };
   const pctIn=t=>{ const m=String(t).match(/(-?\d{1,3}[.,]\d{1,2})\s*[%°"']/)||String(t).match(/(-?\d{1,3}[.,]\d{2})/); return m?Number(m[1].replace(',','.')):null; };
   const set=(k,m)=>{ if(!m){ flags.add(k); return; } e[k]=m.v; if(m.w) src[k]=m.w.b; if(!m.sure) flags.add(k); };
+  /* Đối chiếu target với % hoàn thành in trên ảnh: target ≈ đã bán ÷ %HT.
+     Lệch >3% → thay bằng số suy ra và đánh dấu vàng để quản lý xem lại. */
+  const fixTarget=(dk,tk,p)=>{
+    const dv=e[dk]; if(!(p>0.5&&p<1000&&dv>0)) return;
+    const imp=dv/(p/100), r1=Math.round(imp/100000)*100000, r=Math.abs(imp-r1)/imp<0.004?r1:Math.round(imp/1000)*1000;
+    const off=e[tk]?Math.abs(e[tk]-imp)/imp:1;
+    if(off<=0.004) flags.delete(tk);
+    else if(r===r1&&Math.abs(imp-r1)/imp<0.003){ e[tk]=r1; flags.delete(tk); } /* target tròn trăm nghìn khớp %HT → chắc chắn */
+    else { if(off>0.03) e[tk]=r; flags.add(tk); }
+  };
   // left: DS tong .. DS hang hot .. end
   const lt=Lc.findIndex(r=>/ds\s*t\S{0,2}ng/.test(r.n)), lh=Lc.findIndex(r=>/hang\s*hot|hot$/.test(r.n));
   if(lt>=0){
@@ -312,7 +322,7 @@ function parseScreen(lines, W, headerText, colorAt){
     const mr=seg.find(r=>/so\s*v/.test(r.n));
     if(mr){ const w=mr.words.find(w=>/\d[.,]\d/.test(w.t)); if(w){ let v=pctIn(w.t); if(v!=null){ if(v>0&&colorAt&&colorAt(w.b)==='red') v=-v; e.mom=v; } } }
     const p=pctIn(Lc[lt].t);
-    if(p&&e.dt&&e.target_dt){ const imp=e.dt/(p/100), r=Math.round(imp/100000)*100000; if(Math.abs(r-e.target_dt)/e.target_dt>0.003&&Math.abs(imp-r)/r<0.003){ e.target_dt=r; flags.delete('target_dt'); } }
+    fixTarget('dt','target_dt',p);
   } else ['dt','target_dt'].forEach(k=>flags.add(k));
   if(lh>=0){
     const seg=Lc.slice(lh+1), ms=moneysIn(seg);
@@ -324,6 +334,7 @@ function parseScreen(lines, W, headerText, colorAt){
       if(sum!==e.target_hot){ if(sum%1000===0&&rem.sure){ e.target_hot=sum; flags.delete('target_hot'); } else flags.add('target_hot'); }
       else flags.delete('target_hot');
     }
+    if(!rem) fixTarget('dt_hot','target_hot',pctIn(Lc[lh].t));
   } else ['dt_hot','target_hot'].forEach(k=>flags.add(k));
   // right: can date .. friend sell
   const rc=Rc.findIndex(r=>/can/.test(r.n)&&/date/.test(r.n)), rf=Rc.findIndex(r=>/friend|sell/.test(r.n));
@@ -352,6 +363,9 @@ function parseScreen(lines, W, headerText, colorAt){
   if(qm&&+qm[1]<=+qm[2]&&+qm[2]>0){ e.clpv_done=+qm[1]; e.clpv_total=+qm[2]; e.clpv_pct=Math.round(e.clpv_done/e.clpv_total*10000)/100; }
   else { flags.add('clpv_done'); flags.add('clpv_total'); }
   for(const k of ['target_dt','target_hot','target_cd']) if(e[k]===0) e[k]=null;
+  /* target vô lý (quá nhỏ so với số đã bán, hoặc < 5 triệu) → đánh dấu */
+  if(e.target_dt!=null&&(e.target_dt<5000000||(e.dt>0&&e.target_dt<e.dt*0.25))) flags.add('target_dt');
+  if(e.target_hot!=null&&(e.target_hot<500000||(e.dt_hot>0&&e.target_hot<e.dt_hot*0.25))) flags.add('target_hot');
   return {updated,emp:e,flags:[...flags],src};
 }
 
@@ -457,9 +471,10 @@ function vtCalc(r,date){
   return {ht,lvl:ht==null?'na':ht>=S.vtGood?'good':ht>=S.vtWarn?'warn':'bad'};
 }
 /* Nhân viên mới chuyển shop có doanh số nhà thuốc nhưng chưa được chia target: tạm dùng target chung của shop (giá trị phổ biến nhất). Không áp cho vệ tinh. */
-function defTarget(emps,k){ const c={}; for(const e of emps) if(e[k]>0) c[e[k]]=(c[e[k]]||0)+1; let best=null,n=0; for(const v in c){ if(c[v]>n||(c[v]===n&&+v>best)){ best=+v; n=c[v]; } } return best; }
+function okTarget(e,k){ const v=e[k], d=k==='target_dt'?e.dt:e.dt_hot, min=k==='target_dt'?5000000:500000; return v>=min&&!(d>0&&v<d*0.25); }
+function defTarget(emps,k){ const c={}; for(const e of emps) if(okTarget(e,k)) c[e[k]]=(c[e[k]]||0)+1; let best=null,n=0; for(const v in c){ if(c[v]>n||(c[v]===n&&+v>best)){ best=+v; n=c[v]; } } return best; }
 function effEmps(emps){ emps=emps||[]; const dDt=defTarget(emps,'target_dt'), dH=defTarget(emps,'target_hot');
-  return emps.map(e=>{ if(!(e.dt>0)) return e; const o={...e}; if(!o.target_dt&&dDt){ o.target_dt=dDt; o._tmpDt=true; } if(!o.target_hot&&dH){ o.target_hot=dH; o._tmpHot=true; } return o; }); }
+  return emps.map(e=>{ if(!(e.dt>0)) return e; const o={...e}; if(!okTarget(o,'target_dt')&&dDt){ o.target_dt=dDt; o._tmpDt=true; } if(!okTarget(o,'target_hot')&&dH){ o.target_hot=dH; o._tmpHot=true; } return o; }); }
 function calc(e,date){
   const {d,D}=monthInfo(date), S=state.settings, left=D-d;
   const est=v=>v!=null&&d>0?v/d*D:null;
@@ -639,11 +654,15 @@ function shopTotals(rows){
   const S=state.settings, s=snap(curDate), sum=(a,f)=>a.reduce((t,x)=>t+(f(x)||0),0), {d,D}=monthInfo(curDate), left=D-d, est=v=>v!=null&&d>0?v/d*D:null;
   const st=s&&s.shopTot;
   let tDt,dt,dtT,tH,dtHot,dtHT,bills,conv,qd,qt;
-  if(st){ tDt=st.target_dt||0; dt=st.dt||0; dtT=dt; tH=st.target_hot||0; dtHot=st.dt_hot||0; dtHT=dtHot;
-    bills=st.fs_app!=null&&st.fs_zalo!=null?(st.fs_bills||0):0; conv=bills?st.fs_app+st.fs_zalo:0; qd=st.clpv_done||0; qt=st.clpv_total||0; }
-  else { const T=rows.filter(r=>r.e.target_dt), H=rows.filter(r=>r.e.target_hot);
+  { const T=rows.filter(r=>r.e.target_dt), H=rows.filter(r=>r.e.target_hot);
     tDt=sum(T,r=>r.e.target_dt); tH=sum(H,r=>r.e.target_hot); dt=sum(rows,r=>r.e.dt); dtT=sum(T,r=>r.e.dt); dtHot=sum(rows,r=>r.e.dt_hot); dtHT=sum(H,r=>r.e.dt_hot);
     const FR=rows.filter(r=>r.e.fs_app!=null&&r.e.fs_zalo!=null); bills=sum(FR,r=>r.e.fs_bills); conv=sum(FR,r=>r.e.fs_app+r.e.fs_zalo); qd=sum(rows,r=>r.e.clpv_done); qt=sum(rows,r=>r.e.clpv_total); }
+  /* số tổng từ màn hình Tổng quan shop: chỉ dùng từng mục khi hợp lý, còn lại lấy tổng nhân viên */
+  if(st){
+    if(st.dt>0&&okTarget(st,'target_dt')){ tDt=st.target_dt; dt=st.dt; dtT=dt; }
+    if(st.dt_hot>0&&okTarget(st,'target_hot')){ tH=st.target_hot; dtHot=st.dt_hot; dtHT=dtHot; }
+    if(st.fs_app!=null&&st.fs_zalo!=null&&st.fs_bills>0){ bills=st.fs_bills; conv=st.fs_app+st.fs_zalo; }
+    if(st.clpv_total>0){ qd=st.clpv_done||0; qt=st.clpv_total; } }
   const pE=tDt?est(dtT)/tDt*100:null, pH=tH?est(dtHT)/tH*100:null;
   const htE=tDt?dtT/tDt*100:null, htH=tH?dtHT/tH*100:null;
   const needDt=tDt&&left>0&&tDt>dtT?(tDt-dtT)/left:null;
