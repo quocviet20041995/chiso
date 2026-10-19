@@ -504,27 +504,28 @@ function vtCalc(r,date){
 /* Nhân viên mới chuyển shop có doanh số nhà thuốc nhưng chưa được chia target: tạm dùng target chung của shop (giá trị phổ biến nhất). Không áp cho vệ tinh. */
 function okTarget(e,k){ const v=e[k], d=k==='target_dt'?e.dt:e.dt_hot, min=k==='target_dt'?5000000:500000; return v>=min&&!(d>0&&v<d*0.25); }
 function defTarget(emps,k){ const c={}; for(const e of emps) if(okTarget(e,k)) c[e[k]]=(c[e[k]]||0)+1; let best=null,n=0; for(const v in c){ if(c[v]>n||(c[v]===n&&+v>best)){ best=+v; n=c[v]; } } return best; }
-/* Bạn chưa có target (mới chuyển về): target tháng cả shop chia đều cho các bạn có doanh số dược,
-   để tổng target các bạn = target shop. Hàng hot vẫn lấy target phổ biến của shop. */
-function effEmps(emps,st){ emps=emps||[]; const dH=defTarget(emps,'target_hot'), dDt=defTarget(emps,'target_dt');
-  const sellers=emps.filter(e=>e.dt>0), missing=sellers.filter(e=>!okTarget(e,'target_dt'));
-  let per=null, shopT=null;
-  if(missing.length&&sellers.length){
-    shopT=st&&st.dt>0&&okTarget(st,'target_dt')?st.target_dt:null;
-    if(shopT) per=Math.round(shopT/sellers.length/1000)*1000;
-  }
+/* Target nhân viên = target tháng cả shop (ảnh Tổng quan shop) chia đều cho các bạn có doanh số dược,
+   để tổng target các bạn luôn bằng target shop (hệ thống hay chia theo số người cũ, bạn mới chuyển về chưa có).
+   Không có ảnh Tổng quan shop: giữ target hệ thống, bạn thiếu target tạm lấy target phổ biến. */
+function effEmps(emps,st){ emps=emps||[];
+  const sellers=emps.filter(e=>e.dt>0), n=sellers.length, info={n,missing:sellers.filter(e=>!okTarget(e,'target_dt')).map(e=>short(e.name))};
+  const shopDt=st&&st.dt>0&&okTarget(st,'target_dt')?st.target_dt:null, shopH=st&&st.dt_hot>0&&okTarget(st,'target_hot')?st.target_hot:null;
+  const perDt=shopDt&&n?Math.round(shopDt/n/1000)*1000:null, perH=shopH&&n?Math.round(shopH/n/1000)*1000:null;
+  const dDt=defTarget(emps,'target_dt'), dH=defTarget(emps,'target_hot');
   const out=emps.map(e=>{ const o={...e};
-    if(per){ if(o.dt>0){ if(o.target_dt!==per){ o.target_dt=per; o._tmpDt=true; } } else o.target_dt=null; }
-    else if(o.dt>0&&!okTarget(o,'target_dt')&&dDt){ o.target_dt=dDt; o._tmpDt=true; }
-    if(o.dt>0&&!okTarget(o,'target_hot')&&dH){ o.target_hot=dH; o._tmpHot=true; }
+    if(!(o.dt>0)){ if(perDt) o.target_dt=null; if(perH) o.target_hot=null; return o; }
+    if(perDt){ if(o.target_dt!==perDt){ o._sysDt=o.target_dt; o.target_dt=perDt; o._tmpDt=true; } }
+    else if(!okTarget(o,'target_dt')&&dDt){ o.target_dt=dDt; o._tmpDt=true; }
+    if(perH){ if(o.target_hot!==perH){ o._sysHot=o.target_hot; o.target_hot=perH; o._tmpHot=true; } }
+    else if(!okTarget(o,'target_hot')&&dH){ o.target_hot=dH; o._tmpHot=true; }
     return o; });
-  out.split=missing.length?{per,shopT,n:sellers.length,missing:missing.map(e=>short(e.name))}:null;
+  out.split={...info,perDt,perH,shopDt,shopH,changed:out.some(o=>o._tmpDt||o._tmpHot)};
   return out; }
 function tmpNote(rows){
-  const sp=rows.split, out=[];
-  if(sp&&sp.per) out.push(`${sp.missing.join(', ')} chưa có target trên hệ thống → target tháng shop ${money(sp.shopT)} chia đều ${sp.n} bạn có doanh số dược: ${money(sp.per)}/bạn ("tạm").`);
-  else if(sp) out.push(`${sp.missing.join(', ')} chưa có target trên hệ thống → đang tạm lấy bằng target các bạn khác. Up thêm ảnh "Tổng quan shop" để chia đều target shop cho chính xác.`);
-  const h=rows.filter(r=>r.e._tmpHot).map(r=>short(r.e.name)); if(h.length) out.push(`Target hot "tạm" (${h.join(', ')}): theo target hot chung của shop.`);
+  const sp=rows.split; if(!sp||!sp.changed) return '';
+  const out=[];
+  if(sp.perDt) out.push(`Target DS dược = target shop ${money(sp.shopDt)} chia đều ${sp.n} bạn có doanh số dược: ${money(sp.perDt)}/bạn`+(sp.perH?`; target hot = ${money(sp.shopH)} ÷ ${sp.n} = ${money(sp.perH)}/bạn`:'')+` ("tạm": khác target hệ thống).`);
+  else if(sp.missing.length) out.push(`${sp.missing.join(', ')} chưa có target trên hệ thống → đang tạm lấy bằng target các bạn khác. Up thêm ảnh "Tổng quan shop" để chia đều target shop cho chính xác.`);
   return out.join(' '); }
 function calc(e,date){
   const {d,D}=monthInfo(date), S=state.settings, left=D-d;
