@@ -173,6 +173,23 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
 .zoom img{max-width:100%;border-radius:8px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--nav) + 14px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:.88rem;z-index:30;max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+/* Xem ảnh lớn trước khi tải */
+.exp .imgwrap{position:relative;cursor:zoom-in}
+.exp .imgwrap .zoomhint{position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.62);color:#fff;font-size:.74rem;font-weight:600;padding:4px 9px;border-radius:999px;pointer-events:none}
+.viewer{position:fixed;inset:0;z-index:50;background:#0d1210;display:flex;flex-direction:column}
+.viewer[hidden]{display:none}
+.viewer .vbar{display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) 10px max(12px,env(safe-area-inset-left,0px));color:#fff}
+.viewer .vbar b{flex:1;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.viewer .vbar button{background:rgba(255,255,255,.12);color:#fff;border:0;border-radius:999px;padding:8px 14px;font:600 .85rem var(--f);min-height:38px}
+.viewer .vscroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y pinch-zoom;display:flex;align-items:flex-start}
+.viewer .vscroll img{display:block;margin:auto;max-width:none;background:#fff}
+.viewer.fit .vscroll{align-items:center}
+.viewer.fit .vscroll img{width:100%;height:auto}
+.viewer .vfoot{display:flex;gap:8px;padding:10px max(12px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px))}
+.viewer .vfoot button{flex:1;min-height:46px;border-radius:12px;border:0;font:700 .95rem var(--f)}
+.viewer .vfoot .primary{background:var(--accent);color:var(--accent-ink)}
+.viewer .vfoot .sec{background:rgba(255,255,255,.12);color:#fff}
+.viewer .vtip{color:#9fb0aa;font-size:.74rem;text-align:center;padding:0 12px 4px}
 </style>
 </head>
 <body>
@@ -219,9 +236,9 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
     <section id="alert-panel" class="alertp" hidden></section>
     <div class="panel exp">
       <h2>Bảng chỉ số cả shop</h2>
-      <img id="res-img" alt="Bảng chỉ số cả shop">
-      <button class="primary" id="res-save">Tải / gửi ảnh</button>
-      <div class="muted" style="font-size:.78rem">Nút không chạy thì nhấn giữ vào ảnh để lưu. Ảnh rộng, xoay ngang để xem rõ.</div>
+      <div class="imgwrap" id="res-open"><img id="res-img" alt="Bảng chỉ số cả shop"><span class="zoomhint">🔍 Chạm để xem rõ</span></div>
+      <div class="rowx"><button id="res-view">🔍 Xem ảnh</button><button class="primary" id="res-save">Tải / gửi ảnh</button></div>
+      <div class="muted" style="font-size:.78rem">Xem kỹ số liệu trước khi tải. Nút không chạy thì nhấn giữ vào ảnh để lưu.</div>
     </div>
     <div class="panel exp">
       <h2>Lời khen & cần tập trung</h2>
@@ -231,6 +248,13 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
     <div id="target-banner" class="muted" style="font-size:.78rem" hidden></div>
   </section>
 </main>
+
+<div class="viewer" id="viewer" hidden role="dialog" aria-modal="true" aria-label="Xem ảnh bảng chỉ số">
+  <div class="vbar"><b id="v-title">Xem trước ảnh</b><button id="v-fit">Thu nhỏ</button><button id="v-close" aria-label="Đóng">✕</button></div>
+  <div class="vscroll" id="v-scroll"><img id="v-img" alt="Bảng chỉ số cả shop"></div>
+  <div class="vtip" id="v-tip">Vuốt ngang/dọc để xem hết bảng · chạm 2 lần để phóng/thu</div>
+  <div class="vfoot"><button class="sec" id="v-back">Quay lại</button><button class="primary" id="v-save">Tải / gửi ảnh này</button></div>
+</div>
 
 <main id="v-settings" class="gut" hidden>
   <div class="rowx"><button class="ghost" id="close-settings" style="padding-left:0">← Quay lại</button></div>
@@ -552,6 +576,19 @@ async function renderResult(){
   resGen=()=>shopMessage(rows,best); $('#res-msg').textContent=resGen();
   const tn=tmpNote(rows), tb=$('#target-banner'); tb.hidden=!tn; tb.textContent=tn?'* '+tn:'';
 }
+/* xem ảnh lớn: mặc định phóng to theo chiều cao màn hình để đọc rõ số, vuốt để xem hết */
+function openViewer(){ if(!resCanvas) return; const v=$('#viewer'), im=$('#v-img'); im.src=$('#res-img').src; $('#v-title').textContent='Xem trước · '+dmy(curDate); setZoom(true); v.hidden=false; document.body.style.overflow='hidden'; $('#v-scroll').scrollTo(0,0); }
+function closeViewer(){ $('#viewer').hidden=true; document.body.style.overflow=''; }
+function setZoom(big){ const v=$('#viewer'), im=$('#v-img'), sc=$('#v-scroll');
+  if(big){ v.classList.remove('fit'); const h=Math.max(260,sc.clientHeight||innerHeight*0.7), w=resCanvas.width*Math.min(1,h/resCanvas.height); im.style.width=Math.max(innerWidth*1.6,Math.min(w,resCanvas.width/1.6))+'px'; $('#v-fit').textContent='Thu nhỏ'; }
+  else { v.classList.add('fit'); im.style.width=''; $('#v-fit').textContent='Phóng to'; }
+  v.dataset.big=big?'1':''; }
+$('#res-open').onclick=openViewer; $('#res-view').onclick=openViewer;
+$('#v-close').onclick=closeViewer; $('#v-back').onclick=closeViewer;
+$('#v-fit').onclick=()=>setZoom(!$('#viewer').dataset.big);
+$('#v-img').ondblclick=()=>setZoom(!$('#viewer').dataset.big);
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#viewer').hidden) closeViewer(); });
+$('#v-save').onclick=()=>$('#res-save').click();
 $('#res-save').onclick=()=>{ if(resCanvas) shareFiles([{canvas:resCanvas,name:`bang-chi-so-shop-${curDate.slice(5).replace('-','')}.png`}],null); };
 $('#res-copy').onclick=()=>copyText($('#res-msg').textContent);
 $('#res-regen').onclick=()=>{ if(resGen) $('#res-msg').textContent=resGen(); };
